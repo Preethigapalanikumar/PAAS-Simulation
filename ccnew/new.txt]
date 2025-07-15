@@ -1,0 +1,256 @@
+ const statusElement = document.getElementById('systemStatus');
+            if (metrics.overallSla < config.sla.complianceThreshold || metrics.avgResponseTime > config.sla.responseTimeThreshold) {
+                statusElement.textContent = 'SLA Alert';
+                statusElement.className = 'status-badge critical';
+            } else if (metrics.overallSla < 98 || metrics.avgResponseTime > config.sla.responseTimeThreshold * 0.8) {
+                statusElement.textContent = 'Performance Warning';
+                statusElement.className = 'status-badge warning';
+            } else {
+                statusElement.textContent = 'Optimal';
+                statusElement.className = 'status-badge healthy';
+            }
+
+            // Update chart
+            const now = new Date().toLocaleTimeString().slice(0, 5);
+            chart.data.labels.push(now);
+            chart.data.datasets[0].data.push(parseFloat(metrics.overallSla));
+            chart.data.datasets[1].data.push(metrics.avgResponseTime);
+            chart.data.datasets[2].data.push(parseFloat(metrics.avgAvailability));
+            
+            if (chart.data.labels.length > 15) {
+                chart.data.labels.shift();
+                chart.data.datasets.forEach(dataset => dataset.data.shift());
+            }
+            
+            chart.update('none');
+        }
+
+        function updateServiceDisplay() {
+            const grid = document.getElementById('serviceGrid');
+            grid.innerHTML = '';
+            
+            services.forEach(service => {
+                const div = document.createElement('div');
+                let serviceClass = 'service-card';
+                
+                if (service.scalingType === 'tier-upgrade') serviceClass += ' scaling-vertical';
+                else if (service.scalingType === 'instance-expansion') serviceClass += ' scaling-horizontal';
+                else if (service.slaCompliance < config.sla.complianceThreshold) serviceClass += ' sla-violation';
+                
+                div.className = serviceClass;
+                div.innerHTML = `
+                    ${service.scalingType ? '<div class="scaling-animation"></div>' : ''}
+                    <div class="service-header">
+                        <div class="service-name">${service.id}</div>
+                        <div>
+                            <span class="app-type-badge ${service.appType}">${appTypes[service.appType].name}</span>
+                            <span class="tier-badge ${service.tier}">${service.tier.toUpperCase()}</span>
+                        </div>
+                    </div>
+                    <div class="service-specs">
+                        <div class="service-spec"><strong>Platform:</strong> ${service.platform}</div>
+                        <div class="service-spec"><strong>Instances:</strong> ${service.instances}</div>
+                        <div class="service-spec"><strong>Response:</strong> ${service.responseTime}ms</div>
+                        <div class="service-spec"><strong>Availability:</strong> ${service.availability}%</div>
+                        <div class="service-spec"><strong>Throughput:</strong> ${service.throughput}/min</div>
+                        <div class="service-spec"><strong>Performance:</strong> ${service.performanceIndex}/100</div>
+                    </div>
+                    <div class="performance-progress">
+                        <div class="progress-label">
+                            <span>SLA Compliance</span>
+                            <span>${service.slaCompliance}%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill ${service.slaCompliance >= 98 ? 'healthy' : service.slaCompliance >= 95 ? 'warning' : 'critical'}" 
+                                 style="width: ${service.slaCompliance}%"></div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px; font-size: 12px; color: #7f8c8d;">
+                        Status: ${service.status}
+                        ${service.scalingType ? ` | Scaling: ${service.scalingType}` : ''}
+                    </div>
+                `;
+                grid.appendChild(div);
+            });
+        }
+
+        function performServiceTierUpgrade(service) {
+            if (Date.now() - service.lastScaled < config.serviceTierUpgrade.cooldown) return false;
+            
+            const currentTierIndex = config.serviceTierUpgrade.tiers.indexOf(service.tier);
+            if (currentTierIndex >= config.serviceTierUpgrade.tiers.length - 1) return false;
+            
+            const newTier = config.serviceTierUpgrade.tiers[currentTierIndex + 1];
+            const oldTier = service.tier;
+            
+            service.tier = newTier;
+            service.lastScaled = Date.now();
+            service.scalingType = 'tier-upgrade';
+            
+            log(`Service tier upgrade: ${service.id} upgraded from ${oldTier} to ${newTier} tier`, 'UPGRADE');
+            
+            // Simulate tier upgrade benefits
+            setTimeout(() => {
+                const tierConfig = serviceTiers[newTier];
+                service.responseTime = Math.max(30, Math.floor(service.responseTime * 0.7));
+                service.availability = Math.min(99.99, Number((service.availability + 0.5).toFixed(2)));
+                service.slaCompliance = Math.min(99.9, Number((service.slaCompliance + 2).toFixed(1)));
+                service.performanceIndex = Math.min(100, service.performanceIndex + 15);
+                service.throughput = Math.floor(service.throughput * tierConfig.performance);
+                service.scalingType = null;
+                log(`Service tier upgrade completed for ${service.id} - Enhanced ${newTier} tier active`, 'UPGRADE');
+            }, 4000);
+            
+            return true;
+        }
+
+        function performServiceInstanceExpansion() {
+            if (Date.now() - lastExpansionScale < config.serviceExpansion.cooldown) return false;
+            
+            // Find service that needs instance expansion
+            const serviceNeedingExpansion = services.find(s => 
+                s.instances < config.serviceExpansion.maxInstances && 
+                (s.responseTime > config.sla.responseTimeThreshold * 0.8 || 
+                 s.slaCompliance < 98 || 
+                 s.throughput < appTypes[s.appType].baseCapacity)
+            );
+            
+            if (!serviceNeedingExpansion) return false;
+            
+            const additionalInstances = Math.min(
+                Math.ceil(serviceNeedingExpansion.instances * 0.5), 
+                config.serviceExpansion.maxInstances - serviceNeedingExpansion.instances
+            );
+            
+            serviceNeedingExpansion.instances += additionalInstances;
+            serviceNeedingExpansion.scalingType = 'instance-expansion';
+            lastExpansionScale = Date.now();
+            
+            log(`Service instance expansion: ${serviceNeedingExpansion.id} scaled from ${serviceNeedingExpansion.instances - additionalInstances} to ${serviceNeedingExpansion.instances} instances`, 'EXPAND');
+            
+            // Simulate expansion benefits
+            setTimeout(() => {
+                const scalingFactor = 1 + (additionalInstances * 0.1);
+                serviceNeedingExpansion.responseTime = Math.max(30, Math.floor(serviceNeedingExpansion.responseTime / scalingFactor));
+                serviceNeedingExpansion.throughput = Math.floor(serviceNeedingExpansion.throughput * scalingFactor);
+                serviceNeedingExpansion.availability = Math.min(99.99, Number((serviceNeedingExpansion.availability + 0.2).toFixed(2)));
+                serviceNeedingExpansion.slaCompliance = Math.min(99.9, Number((serviceNeedingExpansion.slaCompliance + 1).toFixed(1)));
+                serviceNeedingExpansion.performanceIndex = Math.min(100, serviceNeedingExpansion.performanceIndex + 10);
+                serviceNeedingExpansion.scalingType = null;
+                log(`Service expansion completed for ${serviceNeedingExpansion.id} - Enhanced capacity active`, 'EXPAND');
+            }, 3000);
+            
+            return true;
+        }
+
+        function monitorSLACompliance() {
+            services.forEach(service => {
+                if (service.slaCompliance < config.sla.complianceThreshold) {
+                    log(`SLA violation detected: ${service.id} compliance at ${service.slaCompliance}%`, 'SLA');
+                    
+                    if (config.autoScalingEnabled) {
+                        // Try tier upgrade first
+                        if (!performServiceTierUpgrade(service)) {
+                            // If tier upgrade not possible, try instance expansion
+                            performServiceInstanceExpansion();
+                        }
+                    }
+                }
+            });
+        }
+
+        function simulateTrafficSpike() {
+            log('Simulating traffic spike across all services', 'SYSTEM');
+            
+            services.forEach(service => {
+                // Increase load metrics
+                service.responseTime = Math.floor(service.responseTime * (1.3 + Math.random() * 0.5));
+                service.throughput = Math.floor(service.throughput * (1.5 + Math.random() * 0.3));
+                service.availability = Math.max(95, service.availability - (Math.random() * 2));
+                service.slaCompliance = Math.max(90, service.slaCompliance - (Math.random() * 5));
+                service.performanceIndex = Math.max(60, service.performanceIndex - (Math.random() * 15));
+            });
+            
+            updateDashboardMetrics();
+            updateServiceDisplay();
+            
+            // Auto-scale if enabled
+            if (config.autoScalingEnabled) {
+                setTimeout(() => {
+                    log('Auto-scaling triggered due to traffic spike', 'SYSTEM');
+                    monitorSLACompliance();
+                }, 2000);
+            }
+        }
+
+        function triggerServiceUpgrade() {
+            const servicesToUpgrade = services.filter(s => 
+                s.tier !== 'enterprise' && 
+                (s.slaCompliance < 98 || s.responseTime > config.sla.responseTimeThreshold * 0.7)
+            );
+            
+            if (servicesToUpgrade.length === 0) {
+                log('No services require tier upgrades at this time', 'UPGRADE');
+                return;
+            }
+            
+            const serviceToUpgrade = servicesToUpgrade[Math.floor(Math.random() * servicesToUpgrade.length)];
+            if (performServiceTierUpgrade(serviceToUpgrade)) {
+                updateServiceDisplay();
+            }
+        }
+
+        function triggerServiceExpansion() {
+            if (performServiceInstanceExpansion()) {
+                updateServiceDisplay();
+            } else {
+                log('No services require instance expansion at this time', 'EXPAND');
+            }
+        }
+
+        function toggleAutoScaling() {
+            config.autoScalingEnabled = !config.autoScalingEnabled;
+            const status = config.autoScalingEnabled ? 'ENABLED' : 'DISABLED';
+            log(`Auto-scaling has been ${status}`, 'CONFIG');
+            
+            const button = event.target;
+            button.textContent = config.autoScalingEnabled ? '🔄 Disable Auto-Scale' : '🔄 Enable Auto-Scale';
+            button.className = config.autoScalingEnabled ? 'btn btn-danger' : 'btn btn-success';
+        }
+
+        function simulatePerformanceVariations() {
+            services.forEach(service => {
+                // Natural performance variations
+                const variation = (Math.random() - 0.5) * 0.1;
+                
+                service.responseTime = Math.max(20, Math.floor(service.responseTime + (service.responseTime * variation)));
+                service.availability = Math.min(99.99, Math.max(95, service.availability + variation));
+                service.throughput = Math.max(100, Math.floor(service.throughput + (service.throughput * variation * 0.5)));
+                service.slaCompliance = Math.min(99.9, Math.max(90, service.slaCompliance + (variation * 2)));
+                service.performanceIndex = Math.min(100, Math.max(50, service.performanceIndex + (variation * 10)));
+            });
+        }
+
+        function initializeDashboard() {
+            updateDashboardMetrics();
+            updateServiceDisplay();
+            log('PaaS hybrid scaling dashboard initialized successfully', 'SYSTEM');
+        }
+
+        // Auto-monitoring and scaling loop
+        setInterval(() => {
+            simulatePerformanceVariations();
+            
+            if (config.autoScalingEnabled) {
+                monitorSLACompliance();
+            }
+            
+            updateDashboardMetrics();
+            updateServiceDisplay();
+        }, 5000);
+
+        // Initialize dashboard on page load
+        window.addEventListener('load', initializeDashboard);
+    </script>
+</body>
+</html>
