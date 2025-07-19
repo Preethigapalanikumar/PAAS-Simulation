@@ -21,6 +21,9 @@ Lightweight and easy to deploy.
 - *Responsive UI*
 
 ---
+![Login Page](screenshots/login.jpg)
+![Dashboard](screenshots/dashboard1.jpg)
+![Dashboard](screenshots/dashboard2.jpg)
 
 ## Getting Started
 
